@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <head>
+    <link rel="icon" href="data:," />
+    <!-- Latest compiled and minified CSS -->
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
+    />
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <!-- jQuery library -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <!-- Popper JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.16.0/umd/popper.min.js"></script>
+    <!-- Latest compiled JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <title>ESP8266</title>
+  </head>
+
+  <body>
+
+    <nav class="navbar navbar-expand-sm bg-light fixed-top">
+      <ul class="navbar-nav navigation" value="INDEX.HTM">
+        <li class="nav-item">
+          <a  href="#"><i class="fa fa-home text-dark"></i>Home</a>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="container" style="margin-top: 60px;">
+
+      <div class="row">
+        <div class="col">
+          <h1>Configurações</h1>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col p-2 text-white invisible rounded-lg" id="requestResponse">
+          <p></p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <p>Conectado à rede: %CONNECTED_WIFI%</p>
+          <p>IP de acesso: %WIFI_IP%</p>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <form>
+            <div class="form-group">
+              <label>Redes wi-fi disponíveis:</label></br>
+              <select class="form-control" id="network">
+                %AVAILABLE_WIFI_NETWORKS%
+              </select>
+            </div>            
+
+            <div class="form-group">
+              <label>Senha</label>
+              <div class="input-group" id="show_hide_password">
+                <input class="form-control" type="password" id="password">
+                <div class="input-group-addon border pr-3 pl-3 pt-1 pb-1">
+                  <a href=""><i class="fa fa-eye-slash text-dark" aria-hidden="true"></i></a>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Distância do sensor até o fundo da caixa d'água, em centímetros:</label>
+              <div class="input-group">
+                <input class="form-control" type="number" %MAX_DIST% id="max_dist">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <button type="button" class="btn btn-primary" id="submit">Salvar</button>
+            </div>
+
+          </form>
+        </div>
+      </div>
+      
+    </div>
+
+    <script type="text/javascript">
+      $(document).ready(function () {
+        $("ul.navigation").click(function () {
+          var goToFile = $(this).attr("value");
+          switch (goToFile) {
+            case "INDEX.HTM":
+              window.location.href = window.location.origin + "/";          
+              break;
+            default:
+              window.location.href = window.location.origin + "/goTo?file=" + goToFile;          
+              break;
+          }
+        });
+
+        // mostrar/esconder senha
+        $("#show_hide_password a").on('click', function(event) {
+          event.preventDefault();
+          if($('#show_hide_password input').attr("type") == "text"){
+              $('#show_hide_password input').attr('type', 'password');
+              $('#show_hide_password i').addClass( "fa-eye-slash" );
+              $('#show_hide_password i').removeClass( "fa-eye" );
+          }else if($('#show_hide_password input').attr("type") == "password"){
+              $('#show_hide_password input').attr('type', 'text');
+              $('#show_hide_password i').removeClass( "fa-eye-slash" );
+              $('#show_hide_password i').addClass( "fa-eye" );
+          }
+        });
+
+        $("button#submit").click(function(){
+          // Mandar request para esp8266
+          var network_name = $("#network option:selected").val();
+          var password = $("#password").val();
+          var max_distance = $("#max_dist").val();
+          var div = $("#requestResponse");
+          div.children("p")[0].innerHTML = "";
+          $.get(""+window.location.origin+"/saveSettings", 
+                { ssid: network_name, pass: password, max_dist: max_distance },
+                function(_data, status, _xhr){
+                  if(status == "success"){
+                    div.addClass("bg-success");
+                    div.addClass("text-white");
+                    div.removeClass("invisible");
+                    div.addClass("visible");
+                    div.children("p")[0].innerHTML = "Credenciais salvas com sucesso!";
+                  }
+                });
+        });
+      });
+    </script>
+  </body>
+</html>
