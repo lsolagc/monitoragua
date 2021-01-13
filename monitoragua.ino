@@ -1,8 +1,6 @@
 #include <ESP8266WiFi.h>
-//#include <ESP8266WiFiMulti.h>
 #include <ESPAsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-//#include <ESP8266mDNS.h>
 #include <SPI.h>
 #include <SD.h>
 
@@ -39,37 +37,10 @@ String passSD = "";
 String max_distance = "";
 
 AsyncWebServer server(80);
-//ESP8266WiFiMulti wifiMulti;
 
-void readCredentialsFromSD() {
-  File file = SD.open(network_settings_file);
-  bool saveToPass = false;
-  int i = 0;
-  int j = 0;
-  if (file) {
-    while (file.available()) {
-      char c = file.read();
-      if (c == '\n') {
-        saveToPass = true;
-        ssid[j] = '\0';
-      }
-      if (saveToPass && c != '\r' && c != '\n') {
-        pass[i] = c;
-        i++;
-      }
-      else if (!saveToPass && c != '\r' && c != '\n') {
-        ssid[j] = c;
-        j++;
-      }
-      delay(100);
-    }
-    pass[i] = '\0';
-    file.close();
-  }
-  Serial.println(ssid);
-  Serial.println(pass);
-
-}
+//---------------------------------------------------------
+// Server/Access point functions
+//---------------------------------------------------------
 
 void setupAccessPoint() {
 
@@ -115,9 +86,6 @@ void setupAccessPoint() {
     WiFi.begin(ssid, pass);
   }
 
-//  wifiMulti.addAP(ssid, pass);
-//  wifiMulti.addAP("ssid", "pass");
-
   WiFi.softAP(APssid, APpass);
   IPAddress APIP = WiFi.softAPIP();
   Serial.print("IP do ponto de acesso: ");
@@ -131,14 +99,6 @@ void setupAccessPoint() {
     }
   }
 
-//  long startConnection = millis();
-//  while (wifiMulti.run() != WL_CONNECTED) {
-//    if (startConnection + connection_timeout > millis()) {
-//      Serial.println("Não conectado ao Wifi");
-//      break;
-//    }
-//  }
-
   if(WiFi.localIP()){
     Serial.print("Conectado ao WiFi: ");
     Serial.println(WiFi.SSID());
@@ -147,49 +107,91 @@ void setupAccessPoint() {
     digitalWrite(D4, HIGH);  
   }
 
-//  startConnection = millis();
-//  while (!MDNS.begin("esp8266")) {
-//    if (startConnection + connection_timeout > millis()) {
-//      Serial.println("Erro ao configurar mDNS");
-//      break;
-//    }
-//  }
-
 }
 
-String readFile(String filename) {
-  File file = SD.open(filename);
-  content = "";
-  if (file) {
-    while (file.available()) {
-      char c = file.read();
-      content += c;
-    }
-    file.close();
-  }
-  return content;
-}
+void setupServer() {
 
-String processor_settings(const String& var) {
-  if (var == "AVAILABLE_WIFI_NETWORKS") {
-    String wifi_nets = "";
-    for (int i = 0; i < AVAIL_NET_LIST_SIZE; i++) {
-      if (available_networks[i][0].length() != 0) {
-        wifi_nets += "<option value=\"" + available_networks[i][0] + "\">" + available_networks[i][0] + " - " + available_networks[i][1] + "</option>";
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
+    content = readFile("INDEX.HTM");
+    request->send_P(200, "text/html", content.c_str(), processor_index);
+  });
+
+  server.on("/goTo", HTTP_GET, [] (AsyncWebServerRequest * request) {
+    String filename;
+    if (request->hasParam("file")) {
+      filename = request->getParam("file")->value();
+      if (filename == "SETTINGS.HTM") {
+        content = readFile(filename);
+        // readHistoryFromSD();
+        request->send_P(200, "text/html", content.c_str(), processor_settings);
+      }
+      else {
+        Serial.println("File not mapped in goTo request");
+        Serial.print("Filename: ");
+        Serial.println(filename);
+        request->send(200, "text/html", content);
       }
     }
-    return wifi_nets;
-  }
-  else if (var == "CONNECTED_WIFI") {
-    return String(WiFi.SSID());
-  }
-  else if (var == "WIFI_IP") {
-    return WiFi.localIP().toString();
-  }
-  else if (var == "MAX_DIST") {
-    return "value=\"" + max_distance + "\"";
-  }
+
+  });
+
+  server.on("/saveSettings", HTTP_GET, [](AsyncWebServerRequest * request) {
+    String netSSID = "" + request->getParam("ssid")->value() + "";
+    String netPASS = "" + request->getParam("pass")->value() + "";
+    String distance = "" + request->getParam("max_dist")->value() + "";
+    if (SD.exists(network_settings_file)) {
+      SD.remove(network_settings_file);
+    }
+    if (netPASS.length() != 0){
+      File file = SD.open(network_settings_file, FILE_WRITE);
+      if (file) {
+        file.println(netSSID);
+        file.print(netPASS);
+        file.close();
+        Serial.println("Credenciais atualizadas");
+  //      request->send(200, "text/plain", "");
+      }
+      else {
+        request->send(500, "text/plain", "Erro ao atualizar credenciais");
+      }
+    }
+    if (SD.exists(water_tank_file)) {
+      SD.remove(water_tank_file);
+      Serial.println("Arquivo do tanque deletado");
+    }
+    File tank_file = SD.open(water_tank_file, FILE_WRITE);
+    Serial.println("Arquivo do tanque criado");
+    if (tank_file) {
+      tank_file.print(distance);
+      tank_file.close();
+      Serial.println("Arquivo do tanque atualizado");
+      max_distance = distance;
+      Serial.println("Distância atualizada");
+      request->send(200, "text/plain", "");
+    }
+    else {
+      request->send(500, "text/plain", "Erro ao atualizar distância máxima");
+    }
+
+  });
+
+  server.on("/updateChart", HTTP_GET, [](AsyncWebServerRequest * request) {
+    Serial.println("Update chart request");
+    if(media > 0.01 && media < max_distance.toFloat()){
+      request->send(200, "text/plain", String((max_distance.toFloat()) - media));
+    }
+    else{
+      request->send(500, "text/plain", "Media zero ou maior que a caixa d'água");
+    }
+      
+  });
+
+  server.begin();
 }
+
+//---------------------------------------------------------
+// Server processors
+//---------------------------------------------------------
 
 String processor_index(const String& var) {
   String pageContent = "";
@@ -199,7 +201,7 @@ String processor_index(const String& var) {
     pageContent += "  function setupChart() {\n";
     pageContent += "    var data = new google.visualization.arrayToDataTable([\n";
     pageContent += "      [\"Nível da água em cm\", \"Altura\"],\n";
-    pageContent += "      [\"Nível da água em cm\", " + String(media) + "],\n";
+    pageContent += "      [\"Nível da água em cm\", " + String(max_distance.toFloat() - media) + "],\n";
     pageContent += "    ]);\n";
     pageContent += "\n";
     pageContent += "    var view = new google.visualization.DataView(data);\n";
@@ -294,6 +296,61 @@ String processor_index(const String& var) {
   return pageContent;
 }
 
+String processor_settings(const String& var) {
+  if (var == "AVAILABLE_WIFI_NETWORKS") {
+    String wifi_nets = "";
+    for (int i = 0; i < AVAIL_NET_LIST_SIZE; i++) {
+      if (available_networks[i][0].length() != 0) {
+        wifi_nets += "<option value=\"" + available_networks[i][0] + "\">" + available_networks[i][0] + " - " + available_networks[i][1] + "</option>";
+      }
+    }
+    return wifi_nets;
+  }
+  else if (var == "CONNECTED_WIFI") {
+    return String(WiFi.SSID());
+  }
+  else if (var == "WIFI_IP") {
+    return WiFi.localIP().toString();
+  }
+  else if (var == "MAX_DIST") {
+    return "value=\"" + max_distance + "\"";
+  }
+}
+
+//---------------------------------------------------------
+// SD card functions
+//---------------------------------------------------------
+
+void readCredentialsFromSD() {
+  File file = SD.open(network_settings_file);
+  bool saveToPass = false;
+  int i = 0;
+  int j = 0;
+  if (file) {
+    while (file.available()) {
+      char c = file.read();
+      if (c == '\n') {
+        saveToPass = true;
+        ssid[j] = '\0';
+      }
+      if (saveToPass && c != '\r' && c != '\n') {
+        pass[i] = c;
+        i++;
+      }
+      else if (!saveToPass && c != '\r' && c != '\n') {
+        ssid[j] = c;
+        j++;
+      }
+      delay(100);
+    }
+    pass[i] = '\0';
+    file.close();
+  }
+  Serial.println(ssid);
+  Serial.println(pass);
+
+}
+
 void readHistoryFromSD() {
   if (SD.exists(history_file)) {
     File file = SD.open(history_file, FILE_WRITE);
@@ -314,86 +371,6 @@ void readHistoryFromSD() {
   }
 }
 
-void setupServer() {
-
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest * request) {
-    content = readFile("INDEX.HTM");
-    request->send_P(200, "text/html", content.c_str(), processor_index);
-  });
-
-  server.on("/goTo", HTTP_GET, [] (AsyncWebServerRequest * request) {
-    String filename;
-    if (request->hasParam("file")) {
-      filename = request->getParam("file")->value();
-      if (filename == "SETTINGS.HTM") {
-        content = readFile(filename);
-        // readHistoryFromSD();
-        request->send_P(200, "text/html", content.c_str(), processor_settings);
-      }
-      else {
-        Serial.println("File not mapped in goTo request");
-        Serial.print("Filename: ");
-        Serial.println(filename);
-        request->send(200, "text/html", content);
-      }
-    }
-
-  });
-
-  server.on("/saveSettings", HTTP_GET, [](AsyncWebServerRequest * request) {
-    String netSSID = "" + request->getParam("ssid")->value() + "";
-    String netPASS = "" + request->getParam("pass")->value() + "";
-    String distance = "" + request->getParam("max_dist")->value() + "";
-    if (SD.exists(network_settings_file)) {
-      SD.remove(network_settings_file);
-    }
-    if (netPASS.length() != 0){
-      File file = SD.open(network_settings_file, FILE_WRITE);
-      if (file) {
-        file.println(netSSID);
-        file.print(netPASS);
-        file.close();
-        Serial.println("Credenciais atualizadas");
-  //      request->send(200, "text/plain", "");
-      }
-      else {
-        request->send(500, "text/plain", "Erro ao atualizar credenciais");
-      }
-    }
-    if (SD.exists(water_tank_file)) {
-      SD.remove(water_tank_file);
-      Serial.println("Arquivo do tanque deletado");
-    }
-    File tank_file = SD.open(water_tank_file, FILE_WRITE);
-    Serial.println("Arquivo do tanque criado");
-    if (tank_file) {
-      tank_file.print(distance);
-      tank_file.close();
-      Serial.println("Arquivo do tanque atualizado");
-      max_distance = distance;
-      Serial.println("Distância atualizada");
-      request->send(200, "text/plain", "");
-    }
-    else {
-      request->send(500, "text/plain", "Erro ao atualizar distância máxima");
-    }
-
-  });
-
-  server.on("/updateChart", HTTP_GET, [](AsyncWebServerRequest * request) {
-    Serial.println("Update chart request");
-    if(media > 0.01 && media < max_distance.toFloat()){
-      request->send(200, "text/plain", String((max_distance.toFloat()) - media));
-    }
-    else{
-      request->send(500, "text/plain", "Media zero ou maior que a caixa d'água");
-    }
-      
-  });
-
-  server.begin();
-}
-
 void setupSD() {
   Serial.print("Initializing SD card...");
 
@@ -403,6 +380,97 @@ void setupSD() {
   }
   Serial.println("initialization done.");
 }
+
+void updateSDHistory() {
+  if (SD.exists(history_file)) {
+    SD.remove(history_file);
+  }
+  File file = SD.open(history_file, FILE_WRITE);
+  if (file) {
+    for (int k = 0; k < historySize; k++) {
+      file.println(history[k]);
+    }
+    file.close();
+
+  }
+  else {
+    // error creating file
+  }
+}
+
+//---------------------------------------------------------
+// Ultrassonic sensor functions
+//---------------------------------------------------------
+
+void trigPulse() {
+  digitalWrite(trig, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trig, LOW);
+}
+
+//---------------------------------------------------------
+// Helper functions
+//---------------------------------------------------------
+
+void calcMedia() {
+  float soma = 0;
+  for (int j = 0; j < (arraySize / 2); j++) {
+    soma += mediumDists[j];
+  }
+  media = soma / (arraySize / 2);
+  if (j == historySize) {
+    memcpy(history, &history[1], sizeof(history) - sizeof(int));
+    history[historySize - 1] = media;
+  }
+  else {
+    history[j] = media;
+    j++;
+  }
+  updateSDHistory();
+  //  Serial.println(history);
+}
+
+String readFile(String filename) {
+  File file = SD.open(filename);
+  content = "";
+  if (file) {
+    while (file.available()) {
+      char c = file.read();
+      content += c;
+    }
+    file.close();
+  }
+  return content;
+}
+
+void removeQuartis() {
+  int k = 0;
+  for (int j = quarterSample; j < quarterSample * 3; j++) {
+    mediumDists[k] = dists[j];
+    k++;
+  }
+}
+
+void sortArray() {
+  int aux;
+  for (int j = 0; j < arraySize; j++) {
+    for (int k = j + 1; k < arraySize; k++) {
+      if (dists[j] > dists [k]) {
+        aux = dists[k];
+        dists[k] = dists[j];
+        dists[j] = aux;
+      }
+    }
+  }
+}
+
+//---------------------------------------------------------
+// Systemfunctions
+//---------------------------------------------------------
+
+//---------------------------------------------------------
+// Arduino functions
+//---------------------------------------------------------
 
 void setup() {
   Serial.begin(115200);
@@ -429,68 +497,6 @@ void setup() {
 
 }
 
-void trigPulse() {
-  digitalWrite(trig, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(trig, LOW);
-}
-
-void sortArray() {
-  int aux;
-  for (int j = 0; j < arraySize; j++) {
-    for (int k = j + 1; k < arraySize; k++) {
-      if (dists[j] > dists [k]) {
-        aux = dists[k];
-        dists[k] = dists[j];
-        dists[j] = aux;
-      }
-    }
-  }
-}
-
-void removeQuartis() {
-  int k = 0;
-  for (int j = quarterSample; j < quarterSample * 3; j++) {
-    mediumDists[k] = dists[j];
-    k++;
-  }
-}
-
-void updateSDHistory() {
-  if (SD.exists(history_file)) {
-    SD.remove(history_file);
-  }
-  File file = SD.open(history_file, FILE_WRITE);
-  if (file) {
-    for (int k = 0; k < historySize; k++) {
-      file.println(history[k]);
-    }
-    file.close();
-
-  }
-  else {
-    // error creating file
-  }
-}
-
-void calcMedia() {
-  float soma = 0;
-  for (int j = 0; j < (arraySize / 2); j++) {
-    soma += mediumDists[j];
-  }
-  media = soma / (arraySize / 2);
-  if (j == historySize) {
-    memcpy(history, &history[1], sizeof(history) - sizeof(int));
-    history[historySize - 1] = media;
-  }
-  else {
-    history[j] = media;
-    j++;
-  }
-  updateSDHistory();
-  //  Serial.println(history);
-}
-
 void loop() {
 
   long int currentTime = millis();
@@ -502,7 +508,6 @@ void loop() {
     float dist_cm = pulse / 58.82;
     if (dist_cm != 0) {
       dists[i] = dist_cm;
-      //history;
       i++;
     }
     if (i == arraySize) {
